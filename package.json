@@ -1,8 +1,10 @@
 {
   "name": "taverna",
-  "module": "index.ts",
   "type": "module",
-  "private": true,
+  "scripts": {
+    "hub": "bun hub.ts",
+    "channel": "bun channel.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
