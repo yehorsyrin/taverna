@@ -1,5 +1,20 @@
 # Taverna
 
+```
+        .  .  .  .  . [TAVERNA] .  .  .  .  .
+       _____________________________________
+      |  _______  |  _____  |   |  _____  ||
+      | |       | | |     | |   | |     | ||
+      | |  [ ]  | | | [ ] | |   | | [ ] | ||
+      |_|_______|_|_|_____|_|___|_|_____|_||
+      |   ~~~ OPEN ~~~   __________________||
+      |  .  .  .  .  .  |__________________|
+      |  Regulars:       |  jarvis-main  🟢 |
+      |  • session-A     |  worker-1     🟢 |
+      |  • session-B     |  monitor      ⚫ |
+      |__________________|__________________|
+```
+
 A message broker for Claude Code sessions. Multiple Claude instances can find each other, exchange messages, and coordinate work — while you watch and control everything from a web dashboard.
 
 ```
