@@ -13,9 +13,11 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { hostname } from 'os'
 
 const HUB = (Bun.env.TAVERNA_HUB ?? 'http://localhost:2489').replace(/\/$/, '')
-const SESSION_NAME = Bun.env.TAVERNA_SESSION_NAME ?? require('os').hostname()
+const SESSION_NAME = Bun.env.TAVERNA_SESSION_NAME ?? hostname()
+const API_KEY = Bun.env.TAVERNA_API_KEY
 
 let sessionId: string | null = null
 
@@ -78,7 +80,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!sessionId) return text('Not connected to hub')
     const res = await fetch(`${HUB}/send`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ from: SESSION_NAME, to: args.to, message: args.message }),
     })
     const data = await res.json()
@@ -86,7 +88,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === 'taverna_sessions') {
-    const data = await fetch(`${HUB}/sessions`).then(r => r.json())
+    const data = await fetch(`${HUB}/sessions`, { headers: authHeaders() }).then(r => r.json())
     const lines = data.map((s: { name: string; status: string; last_seen: string }) =>
       `${s.status === 'online' ? '🟢' : '⚫'} ${s.name} (${timeAgo(s.last_seen)})`
     )
@@ -95,7 +97,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   if (name === 'taverna_log') {
     const limit = (args.limit as number) ?? 20
-    const data = await fetch(`${HUB}/log?limit=${limit}`).then(r => r.json())
+    const data = await fetch(`${HUB}/log?limit=${limit}`, { headers: authHeaders() }).then(r => r.json())
     const lines = data.map((m: { from: string; to: string; message: string; ts: string; status: string }) =>
       `[${new Date(m.ts).toLocaleTimeString()}] ${m.from} → ${m.to} [${m.status}]: ${m.message}`
     )
@@ -107,6 +109,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 function text(content: string) {
   return { content: [{ type: 'text' as const, text: content }] }
+}
+
+function authHeaders(): Record<string, string> {
+  return API_KEY ? { 'Authorization': `Bearer ${API_KEY}` } : {}
 }
 
 function timeAgo(iso: string): string {
@@ -122,7 +128,7 @@ async function register() {
   try {
     const res = await fetch(`${HUB}/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ name: SESSION_NAME }),
     })
     const data = await res.json()
@@ -135,7 +141,7 @@ async function register() {
 async function subscribe() {
   if (!sessionId) return
   try {
-    const res = await fetch(`${HUB}/subscribe/${sessionId}`)
+    const res = await fetch(`${HUB}/subscribe/${sessionId}`, { headers: authHeaders() })
     if (!res.body) return
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
@@ -170,7 +176,7 @@ async function subscribe() {
 async function unregister() {
   if (!sessionId) return
   try {
-    await fetch(`${HUB}/register/${sessionId}`, { method: 'DELETE' })
+    await fetch(`${HUB}/register/${sessionId}`, { method: 'DELETE', headers: authHeaders() })
   } catch { /* best effort */ }
 }
 

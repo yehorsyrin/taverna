@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "taverna": {
+      "command": "bun",
+      "args": ["/absolute/path/to/taverna/channel.ts"],
+      "env": {
+        "TAVERNA_SESSION_NAME": "jarvis-main",
+        "TAVERNA_HUB": "http://localhost:2489",
+        "TAVERNA_API_KEY": "your-secret-key-here"
+      }
+    }
+  }
+}

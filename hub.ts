@@ -2,9 +2,19 @@
 /**
  * Taverna Hub — central message broker for Claude Code sessions.
  * Usage: bun hub.ts
+ *
+ * Configuration (env vars):
+ *   TAVERNA_PORT     Port to listen on (default: 2489)
+ *   TAVERNA_API_KEY  If set, all API requests must include Authorization: Bearer <key>
+ *                    The dashboard (GET /) and SSE events (GET /events) are always public.
+ *   TAVERNA_LOG_FILE Path to persist message log (default: taverna.log in cwd)
  */
 
+import { existsSync, readFileSync, appendFileSync } from 'fs'
+
 const PORT = parseInt(Bun.env.TAVERNA_PORT ?? '2489')
+const API_KEY = Bun.env.TAVERNA_API_KEY ?? null
+const LOG_FILE = Bun.env.TAVERNA_LOG_FILE ?? 'taverna.log'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,12 +81,32 @@ function isAllowed(from: string, to: string): boolean {
   return true  // default allow if no rule matches
 }
 
+function checkAuth(req: Request): boolean {
+  if (!API_KEY) return true
+  const auth = req.headers.get('Authorization')
+  return auth === `Bearer ${API_KEY}`
+}
+
 function addToLog(msg: Message) {
   log.push(msg)
   if (log.length > 1000) log.shift()
+  // persist to file
+  try { appendFileSync(LOG_FILE, JSON.stringify(msg) + '\n') } catch { /* best effort */ }
   // notify dashboard
   const data = `data: ${JSON.stringify(msg)}\n\n`
   for (const emit of dashboardListeners) emit(data)
+}
+
+// ─── Load persisted log on startup ───────────────────────────────────────────
+if (existsSync(LOG_FILE)) {
+  try {
+    const lines = readFileSync(LOG_FILE, 'utf8').trim().split('\n').filter(Boolean)
+    for (const line of lines) {
+      try { log.push(JSON.parse(line)) } catch { /* skip malformed lines */ }
+    }
+    // keep only last 1000
+    if (log.length > 1000) log.splice(0, log.length - 1000)
+  } catch { /* ignore read errors */ }
 }
 
 function deliver(targetSession: Session, msg: Message): boolean {
@@ -124,6 +154,34 @@ Bun.serve({
     const url = new URL(req.url)
     const path = url.pathname
     const method = req.method
+
+    // ── Public routes (no auth required) ────────────────────────────────────
+    if (method === 'GET' && (path === '/' || path === '' || path === '/events')) {
+      if (path === '/events') {
+        const stream = new ReadableStream({
+          start(ctrl) {
+            const enc = new TextEncoder()
+            const emit = (data: string) => ctrl.enqueue(enc.encode(data))
+            dashboardListeners.add(emit)
+            ctrl.enqueue(enc.encode(': connected\n\n'))
+            const hb = setInterval(() => ctrl.enqueue(enc.encode(': keep-alive\n\n')), 30_000)
+            req.signal.addEventListener('abort', () => {
+              clearInterval(hb)
+              dashboardListeners.delete(emit)
+            })
+          },
+        })
+        return new Response(stream, {
+          headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+        })
+      }
+      return new Response(DASHBOARD_HTML, { headers: { 'Content-Type': 'text/html' } })
+    }
+
+    // ── Auth check for all other routes ─────────────────────────────────────
+    if (!checkAuth(req)) {
+      return json({ error: 'unauthorized' }, 401)
+    }
 
     // ── POST /register ──────────────────────────────────────────────────────
     if (method === 'POST' && path === '/register') {
@@ -277,31 +335,6 @@ Bun.serve({
         return json({ error: 'invalid index' }, 400)
       acl.splice(idx, 1)
       return json({ ok: true })
-    }
-
-    // ── GET /events (dashboard SSE) ───────────────────────────────────────────
-    if (method === 'GET' && path === '/events') {
-      const stream = new ReadableStream({
-        start(ctrl) {
-          const enc = new TextEncoder()
-          const emit = (data: string) => ctrl.enqueue(enc.encode(data))
-          dashboardListeners.add(emit)
-          ctrl.enqueue(enc.encode(': connected\n\n'))
-          const hb = setInterval(() => ctrl.enqueue(enc.encode(': keep-alive\n\n')), 30_000)
-          req.signal.addEventListener('abort', () => {
-            clearInterval(hb)
-            dashboardListeners.delete(emit)
-          })
-        },
-      })
-      return new Response(stream, {
-        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
-      })
-    }
-
-    // ── GET / (dashboard) ─────────────────────────────────────────────────────
-    if (method === 'GET' && (path === '/' || path === '')) {
-      return new Response(DASHBOARD_HTML, { headers: { 'Content-Type': 'text/html' } })
     }
 
     return json({ error: 'not found' }, 404)

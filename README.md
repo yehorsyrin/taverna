@@ -80,11 +80,15 @@ Open `http://localhost:2489` — sessions, live message log, and manual send for
 
 ## Configuration
 
+Copy `.mcp.json.example` to `.mcp.json` and adjust the path and session name.
+
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `TAVERNA_HUB` | `http://localhost:2489` | Hub URL (for channel.ts) |
-| `TAVERNA_SESSION_NAME` | hostname | Name shown in dashboard |
-| `TAVERNA_PORT` | `2489` | Port hub listens on (for hub.ts) |
+| `TAVERNA_PORT` | `2489` | Port hub listens on (`hub.ts`) |
+| `TAVERNA_API_KEY` | _(none)_ | If set, all API requests require `Authorization: Bearer <key>`. Dashboard is always public. |
+| `TAVERNA_LOG_FILE` | `taverna.log` | Path for persistent message log (`hub.ts`) |
+| `TAVERNA_HUB` | `http://localhost:2489` | Hub URL (`channel.ts`) |
+| `TAVERNA_SESSION_NAME` | hostname | Session name shown in dashboard (`channel.ts`) |
 
 ## API
 
