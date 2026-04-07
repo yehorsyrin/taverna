@@ -69,8 +69,15 @@ const shortId  = () => crypto.randomUUID().slice(0, 8)
 const now      = () => new Date().toISOString()
 const uptime   = () => Math.floor((Date.now() - START_TIME) / 1000)
 
-function sessionByName(name: string) {
-  for (const s of sessions.values()) if (s.name === name) return s
+function sessionByName(name: string): Session | undefined {
+  // prefer online session; fall back to most recently seen
+  let fallback: Session | undefined
+  for (const s of sessions.values()) {
+    if (s.name !== name) continue
+    if (s.status === 'online') return s
+    if (!fallback || s.last_seen > fallback.last_seen) fallback = s
+  }
+  return fallback
 }
 
 function isAllowed(from: string, to: string): boolean {
@@ -262,6 +269,10 @@ Bun.serve({
     if (method === 'POST' && path === '/register') {
       const body = await req.json() as { name?: string }
       if (!body.name) return jsonRes({ error: 'name required' }, 400)
+      // evict any previous sessions with the same name
+      for (const [eid, es] of sessions.entries()) {
+        if (es.name === body.name) { subscribers.delete(eid); sessions.delete(eid) }
+      }
       const id = shortId()
       sessions.set(id, { id, name: body.name, status: 'online', registered_at: now(), last_seen: now(), msg_sent: 0, msg_received: 0 })
       notifyDashboard('sessions', [...sessions.values()])
@@ -284,6 +295,16 @@ Bun.serve({
       if (!s) return jsonRes({ error: 'not found' }, 404)
       s.last_seen = now(); s.status = 'online'
       return jsonRes({ ok: true })
+    }
+
+    // ── POST /sessions/cleanup ───────────────────────────────────────────────
+    if (method === 'POST' && path === '/sessions/cleanup') {
+      let removed = 0
+      for (const [id, s] of sessions.entries()) {
+        if (s.status === 'offline') { subscribers.delete(id); sessions.delete(id); removed++ }
+      }
+      notifyDashboard('sessions', [...sessions.values()])
+      return jsonRes({ removed })
     }
 
     // ── GET /sessions ────────────────────────────────────────────────────────
@@ -464,7 +485,10 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
     .session-card.active { background: var(--bg3); border-color: var(--border); }
     .session-card.filter-active { border-color: var(--blue) !important; }
     .sc-name { font-size: 0.85rem; display: flex; align-items: center; gap: 6px; }
-    .sc-meta { font-size: 0.72rem; color: var(--muted); margin-top: 3px; display: flex; gap: 8px; }
+    .sc-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sc-send-btn { background: none; border: none; cursor: pointer; font-size: 0.8rem; opacity: 0; transition: opacity 0.15s; padding: 0 2px; line-height: 1; }
+    .session-card:hover .sc-send-btn { opacity: 1; }
+    .sc-meta { font-size: 0.72rem; color: var(--muted); margin-top: 3px; display: flex; gap: 8px; justify-content: space-between; }
     .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     .dot.online  { background: var(--green); }
     .dot.offline { background: var(--muted); }
@@ -514,6 +538,9 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
     .le-status.no_recipient { color: var(--muted); }
     .le-body { margin-top: 5px; color: var(--text); word-break: break-word; }
     .le-reply { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+    .le-reply-btn { background: none; border: none; color: var(--muted); font-size: 0.7rem; cursor: pointer; margin-left: auto; padding: 2px 6px; border-radius: 3px; opacity: 0; transition: opacity 0.15s; font-family: inherit; }
+    .le-reply-btn:hover { color: var(--blue); background: var(--bg3); }
+    .log-entry:hover .le-reply-btn { opacity: 1; }
     .le-ts { font-size: 0.7rem; color: var(--muted); margin-top: 3px; }
     .log-empty { color: var(--muted); text-align: center; padding: 40px; font-size: 0.85rem; }
 
@@ -578,6 +605,10 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
     .hc-value.small  { font-size: 1rem; }
     .hc-sub   { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
 
+    .label-hint { font-size: 0.68rem; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+    details summary { list-style: none; }
+    details summary::-webkit-details-marker { display: none; }
+
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -603,7 +634,10 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
 
 <div class="main">
   <aside>
-    <div class="sidebar-title">Sessions</div>
+    <div class="sidebar-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Sessions</span>
+      <button class="btn btn-muted" style="font-size:0.65rem;padding:2px 6px" onclick="clearOffline()" title="Remove all offline sessions">Clear offline</button>
+    </div>
     <div id="session-list"><div style="color:var(--muted);font-size:0.8rem;padding:8px 4px">No sessions</div></div>
   </aside>
 
@@ -639,14 +673,15 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
 
       <!-- SEND -->
       <div class="panel" id="panel-send">
+        <datalist id="session-names"></datalist>
         <div class="form-grid">
           <div class="form-group">
-            <label>From</label>
-            <input id="s-from" placeholder="session-name (or hub)">
+            <label>From <span class="label-hint">(your session name)</span></label>
+            <input id="s-from" placeholder="dashboard" list="session-names" autocomplete="off">
           </div>
           <div class="form-group">
-            <label>To (name or * for broadcast)</label>
-            <input id="s-to" placeholder="session-name or *">
+            <label>To <span class="label-hint">(session name or * for all)</span></label>
+            <input id="s-to" placeholder="session-name or *" list="session-names" autocomplete="off">
           </div>
           <div class="form-group">
             <label>Type</label>
@@ -658,16 +693,22 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
               <option value="reply">reply</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>Reply-to msg_id (optional)</label>
-            <input id="s-reply-to" placeholder="leave empty if not a reply">
-          </div>
           <div class="form-group full">
             <label>Message</label>
-            <textarea id="s-msg" placeholder="Type your message…"></textarea>
+            <textarea id="s-msg" placeholder="Type your message…" onkeydown="if(event.ctrlKey&&event.key==='Enter')sendMessage()"></textarea>
+            <span class="label-hint" style="margin-top:3px">Ctrl+Enter to send</span>
           </div>
           <div class="form-group full">
-            <button class="btn btn-primary" onclick="sendMessage()">Send message</button>
+            <details>
+              <summary style="cursor:pointer;font-size:0.75rem;color:var(--muted);user-select:none">Advanced</summary>
+              <div class="form-group" style="margin-top:8px">
+                <label>Reply-to msg_id</label>
+                <input id="s-reply-to" placeholder="leave empty if not a reply">
+              </div>
+            </details>
+          </div>
+          <div class="form-group full">
+            <button class="btn btn-primary" onclick="sendMessage()">Send</button>
           </div>
           <div class="form-group full">
             <div class="result-box" id="send-result" style="display:none"></div>
@@ -825,22 +866,48 @@ function renderSessions() {
     allSessions.map(s => \`<option value="\${s.name}">\${s.name}</option>\`).join('')
   sel.value = cur
 
+  // update datalist for send form
+  const dl = document.getElementById('session-names')
+  if (dl) dl.innerHTML = allSessions.filter(s => s.status === 'online').map(s => \`<option value="\${s.name}">\`).join('')
+
   if (!allSessions.length) {
     el.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;padding:8px 4px">No sessions</div>'
     return
   }
   el.innerHTML = allSessions.map(s => \`
     <div class="session-card \${activeFilterSession === s.name ? 'filter-active' : ''}"
-         onclick="filterBySession('\${s.name}')" title="Click to filter log">
+         onclick="filterBySession('\${s.name}')">
       <div class="sc-name">
         <div class="dot \${s.status}"></div>
-        \${s.name}
+        <span class="sc-label">\${s.name}</span>
+        \${s.status === 'online' ? \`<button class="sc-send-btn" onclick="event.stopPropagation();quickSend('\${s.name}')" title="Send message">📤</button>\` : ''}
       </div>
       <div class="sc-meta">
         <span>↑\${s.msg_sent} ↓\${s.msg_received}</span>
-        <span>\${timeAgo(s.last_seen)}</span>
+        <span>\${s.status === 'online' ? '<span style=\\"color:var(--green)\\">online</span>' : timeAgo(s.last_seen) + ' ago'}</span>
       </div>
     </div>\`).join('')
+}
+
+async function clearOffline() {
+  await fetch('/sessions/cleanup', { method: 'POST' })
+}
+
+function replyTo(msgId, fromSession) {
+  document.getElementById('s-to').value = fromSession
+  document.getElementById('s-reply-to').value = msgId
+  document.getElementById('s-type').value = 'reply'
+  document.querySelector('details').open = true
+  showTab('send')
+  setTimeout(() => document.getElementById('s-msg').focus(), 50)
+}
+
+function quickSend(name) {
+  document.getElementById('s-to').value = name
+  document.getElementById('s-from').value = document.getElementById('s-from').value || 'dashboard'
+  document.getElementById('s-msg').value = ''
+  showTab('send')
+  setTimeout(() => document.getElementById('s-msg').focus(), 50)
 }
 
 function filterBySession(name) {
@@ -877,10 +944,11 @@ function renderLog() {
         <span class="le-to">\${m.to}</span>
         <span class="le-type \${m.type || 'message'}">\${m.type || 'message'}</span>
         <span class="le-status \${m.status}">\${m.status}</span>
+        <button class="le-reply-btn" onclick="replyTo('\${m.msg_id}','\${m.from}')" title="Reply">↩ Reply</button>
       </div>
       \${m.reply_to ? \`<div class="le-reply">↩ reply to \${m.reply_to}</div>\` : ''}
       <div class="le-body">\${escHtml(m.message)}</div>
-      <div class="le-ts">\${new Date(m.ts).toLocaleString()} · \${m.msg_id}</div>
+      <div class="le-ts">\${new Date(m.ts).toLocaleString()}</div>
     </div>\`).join('')
 }
 
@@ -918,6 +986,10 @@ async function sendMessage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from, to, message, type, reply_to })
     }).then(r => r.json())
+    if (!r.error) {
+      document.getElementById('s-msg').value = ''
+      document.getElementById('s-reply-to').value = ''
+    }
     showResult(box, JSON.stringify(r, null, 2), !r.error)
   } catch (e) { showResult(box, String(e), false) }
 }

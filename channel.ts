@@ -16,7 +16,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { hostname } from 'os'
 
 const HUB = (Bun.env.TAVERNA_HUB ?? 'http://localhost:2489').replace(/\/$/, '')
-const SESSION_NAME = Bun.env.TAVERNA_SESSION_NAME ?? hostname()
+const SESSION_NAME = Bun.env.TAVERNA_SESSION_NAME ?? `${hostname()}-${Math.random().toString(36).slice(2, 6)}`
 const API_KEY = Bun.env.TAVERNA_API_KEY
 
 let sessionId: string | null = null
@@ -141,10 +141,13 @@ async function register() {
 }
 
 async function subscribe() {
-  if (!sessionId) return
+  // re-register if we lost our session (hub restart)
+  if (!sessionId) await register()
+  if (!sessionId) { setTimeout(subscribe, 5_000); return }
+
   try {
     const res = await fetch(`${HUB}/subscribe/${sessionId}`, { headers: authHeaders() })
-    if (!res.body) return
+    if (!res.body) { sessionId = null; setTimeout(subscribe, 5_000); return }
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -171,7 +174,8 @@ async function subscribe() {
     }
   } catch { /* ignore connection errors */ }
 
-  // reconnect after 5s
+  // lost connection — clear session id and reconnect (will re-register)
+  sessionId = null
   setTimeout(subscribe, 5_000)
 }
 
