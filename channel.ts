@@ -79,7 +79,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const args = req.params.arguments as Record<string, unknown>
 
   if (name === 'taverna_send') {
-    if (!sessionId) return text('Not connected to hub')
+    if (!sessionId) await register()
+    if (!sessionId) return text('Not connected to hub — hub may be offline')
     const res = await fetch(`${HUB}/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },

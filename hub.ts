@@ -808,12 +808,18 @@ let logFilter = { session: '', type: '', search: '' }
 let activeFilterSession = null
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
+let _es = null
 function connect() {
-  const es = new EventSource('/events')
+  if (_es) { _es.close(); _es = null }
+  const es = _es = new EventSource('/events')
   const dot = document.getElementById('conn-dot')
 
   es.onopen = () => dot.className = 'conn-dot'
-  es.onerror = () => { dot.className = 'conn-dot disconnected'; setTimeout(connect, 3000) }
+  es.onerror = () => {
+    dot.className = 'conn-dot disconnected'
+    es.close()
+    if (_es === es) { _es = null; setTimeout(connect, 3000) }
+  }
 
   es.onmessage = e => {
     try {
