@@ -202,6 +202,7 @@ setInterval(pruneQueue, 5 * 60 * 1000)
 Bun.serve({
   port: PORT,
   hostname: '0.0.0.0',
+  idleTimeout: 0,
 
   async fetch(req) {
     const url    = new URL(req.url)
