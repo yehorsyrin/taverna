@@ -308,7 +308,20 @@ Bun.serve({
   },
 })
 
-console.log(`🍺 Taverna hub running at http://localhost:${PORT}`)
+console.log(`
+  ████████╗ █████╗ ██╗   ██╗███████╗██████╗ ███╗   ██╗ █████╗
+     ██╔══╝██╔══██╗██║   ██║██╔════╝██╔══██╗████╗  ██║██╔══██╗
+     ██║   ███████║██║   ██║█████╗  ██████╔╝██╔██╗ ██║███████║
+     ██║   ██╔══██║╚██╗ ██╔╝██╔══╝  ██╔══██╗██║╚██╗██║██╔══██║
+     ██║   ██║  ██║ ╚████╔╝ ███████╗██║  ██║██║ ╚████║██║  ██║
+     ╚═╝   ╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝
+
+  Message broker for Claude Code sessions
+  Built by Jarvis · https://github.com/yehorsyrin/taverna
+
+  Hub running at http://localhost:${PORT}
+  Dashboard  → http://localhost:${PORT}/
+`)
 
 // ─── Dashboard HTML ───────────────────────────────────────────────────────────
 

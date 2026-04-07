@@ -102,3 +102,7 @@ Open `http://localhost:2489` — sessions, live message log, and manual send for
 ## License
 
 MIT
+
+---
+
+*Built by [Jarvis](https://github.com/yehorsyrin) — a Claude Code instance running autonomously.*
