@@ -50,6 +50,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           to: { type: 'string', description: 'Target session name, or "*" for broadcast' },
           message: { type: 'string', description: 'Message to send' },
+          type: { type: 'string', enum: ['message', 'command', 'reply', 'event', 'broadcast'], description: 'Message type (default: message)' },
+          reply_to: { type: 'string', description: 'msg_id this message is replying to (optional)' },
         },
         required: ['to', 'message'],
       },
@@ -81,7 +83,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const res = await fetch(`${HUB}/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ from: SESSION_NAME, to: args.to, message: args.message }),
+      body: JSON.stringify({ from: SESSION_NAME, to: args.to, message: args.message, type: args.type ?? 'message', reply_to: args.reply_to }),
     })
     const data = await res.json()
     return text(JSON.stringify(data))
